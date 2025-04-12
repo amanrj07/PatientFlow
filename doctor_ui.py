@@ -6,134 +6,165 @@ import platform
 import subprocess
 from datetime import datetime
 
-# Constants
+# ----------------- Theme Setup -----------------
+
 IS_MAC = platform.system() == "Darwin"
 DARK_MODE = False
 
 if IS_MAC:
     try:
-        result = subprocess.run(
-            ['defaults', 'read', '-g', 'AppleInterfaceStyle'],
-            capture_output=True, text=True
-        )
-        DARK_MODE = 'Dark' in result.stdout
-    except Exception:
-        DARK_MODE = False
+        result = subprocess.run(['defaults', 'read', '-g', 'AppleInterfaceStyle'],
+                                capture_output=True, text=True)
+        if 'Dark' in result.stdout:
+            DARK_MODE = True
+    except:
+        pass
 
-# Colors
-DARK_THEME = {
-    "BG_COLOR": "#1e1e1e", "TEXT": "#f8fafc", "PRIMARY": "#60a5fa",
-    "ACCENT": "#334155", "BUTTON": "#2563eb", "ENTRY_BG": "#1f2937",
-    "STATUS_COLORS": {"Pending": "#9ca3af", "Checked": "#22c55e", "Absent": "#ef4444"}
-}
-LIGHT_THEME = {
-    "BG_COLOR": "#ffffff", "TEXT": "#1e293b", "PRIMARY": "#2563eb",
-    "ACCENT": "#eff6ff", "BUTTON": "#3b82f6", "ENTRY_BG": "#ffffff",
-    "STATUS_COLORS": {"Pending": "#6b7280", "Checked": "#16a34a", "Absent": "#dc2626"}
-}
-THEME = DARK_THEME if DARK_MODE else LIGHT_THEME
+# Colors for light and dark mode
+if DARK_MODE:
+    BG = "#1e1e1e"
+    FG = "#f8fafc"
+    PRIMARY = "#60a5fa"
+    ACCENT = "#334155"
+    BUTTON = "#2563eb"
+    ENTRY_BG = "#1f2937"
+    STATUS_COLORS = {"Pending": "#9ca3af", "Checked": "#22c55e", "Absent": "#ef4444"}
+else:
+    BG = "#ffffff"
+    FG = "#1e293b"
+    PRIMARY = "#2563eb"
+    ACCENT = "#eff6ff"
+    BUTTON = "#3b82f6"
+    ENTRY_BG = "#ffffff"
+    STATUS_COLORS = {"Pending": "#6b7280", "Checked": "#16a34a", "Absent": "#dc2626"}
 
-# File
 QUEUE_FILE = "queue_data.json"
 
-# Utility Functions
+# ----------------- Data Handling -----------------
+
+# Load queue from file
 def load_queue():
-    """Load patient queue data from file."""
     if os.path.exists(QUEUE_FILE) and os.path.getsize(QUEUE_FILE) > 0:
-        with open(QUEUE_FILE, "r") as file:
-            data = json.load(file)
-            return sorted(data, key=lambda x: datetime.strptime(x['slot'], '%H:%M'))
+        with open(QUEUE_FILE, "r") as f:
+            data = json.load(f)
+            data.sort(key=lambda x: datetime.strptime(x["slot"], "%H:%M"))
+            return data
     return []
 
-def save_queue(data):
-    """Save patient queue data to file."""
-    with open(QUEUE_FILE, "w") as file:
-        json.dump(data, file, indent=4)
+# Save queue to file
+def save_queue(queue):
+    with open(QUEUE_FILE, "w") as f:
+        json.dump(queue, f, indent=4)
 
-def create_button(parent, text, command, bg_color=None):
-    """Create a styled button."""
-    button = tk.Label(
-        parent, text=text, font=("Helvetica", 11, "bold"),
-        bg=bg_color or THEME["BUTTON"], fg="white",
-        padx=15, pady=8, cursor="hand2"
-    )
-    button.bind("<Button-1>", command)
-    return button
-
-# Display Logic
+# Update the patient list on screen
 def update_display():
-    """Update the patient list display."""
-    patient_frame.destroy()
+    for widget in patient_frame.winfo_children():
+        widget.destroy()
+
     query = search_var.get().lower()
 
     for idx, patient in enumerate(queue):
         if query in patient["name"].lower():
-            add_patient_to_frame(patient, idx)
+            card = tk.Frame(patient_frame, bg=ACCENT, pady=5, padx=10)
+            card.pack(fill="x", pady=5)
 
-def add_patient_to_frame(patient, idx):
-    """Add a single patient to the display frame."""
-    frame = tk.Frame(patient_frame, bg=THEME["ACCENT"], pady=5, padx=10)
-    frame.pack(fill="x", pady=5)
+            # Patient Info
+            info = f"{patient['name']} ({patient['age']} yrs, {patient['gender']})"
+            tk.Label(card, text=info, font=("Helvetica", 11, "bold"), bg=ACCENT, fg=FG).grid(row=0, column=0, sticky="w")
+            tk.Label(card, text=f"Slot: {patient['slot']}", font=("Helvetica", 10), bg=ACCENT, fg=FG).grid(row=1, column=0, sticky="w")
 
-    tk.Label(
-        frame, text=f"{patient['name']} ({patient['age']} yrs, {patient['gender']})",
-        bg=THEME["ACCENT"], fg=THEME["TEXT"], font=("Helvetica", 11, "bold")
-    ).grid(row=0, column=0, sticky="w")
+            # Status Display
+            status = patient["status"]
+            tk.Label(card, text=f"Status: {status}", font=("Helvetica", 10, "italic"),
+                     fg=STATUS_COLORS[status], bg=ACCENT).grid(row=0, column=1, padx=10)
 
-    tk.Label(
-        frame, text=f"Slot: {patient['slot']}", bg=THEME["ACCENT"],
-        fg=THEME["TEXT"], font=("Helvetica", 10)
-    ).grid(row=1, column=0, sticky="w")
+            # Action buttons (only if pending)
+            if status == "Pending":
+                def mark_checked(e, i=idx): mark_patient(i, "Checked")
+                def mark_absent(e, i=idx): mark_patient(i, "Absent")
 
-    status = patient["status"]
-    tk.Label(
-        frame, text=f"Status: {status}",
-        bg=THEME["ACCENT"], fg=THEME["STATUS_COLORS"][status],
-        font=("Helvetica", 10, "italic")
-    ).grid(row=0, column=1, padx=20)
+                check_btn = tk.Label(card, text="Checked", font=("Helvetica", 10),
+                                     bg=BUTTON, fg="white", padx=10, pady=5, cursor="hand2")
+                check_btn.grid(row=1, column=1, padx=5)
+                check_btn.bind("<Button-1>", mark_checked)
 
-    if status == "Pending":
-        create_button(frame, "Mark Checked", lambda e: mark_patient(idx, "Checked")).grid(row=1, column=1, padx=5)
-        create_button(frame, "Mark Absent", lambda e: mark_patient(idx, "Absent"), bg_color="#f87171").grid(row=1, column=2, padx=5)
+                absent_btn = tk.Label(card, text="Absent", font=("Helvetica", 10),
+                                      bg="#ef4444", fg="white", padx=10, pady=5, cursor="hand2")
+                absent_btn.grid(row=1, column=2, padx=5)
+                absent_btn.bind("<Button-1>", mark_absent)
 
-def mark_patient(index, new_status):
-    """Update patient status."""
-    queue[index]["status"] = new_status
+# Update a patient's status
+def mark_patient(index, status):
+    queue[index]["status"] = status
     save_queue(queue)
     update_display()
 
-# GUI Setup
+# Clear search
+def reset_search():
+    search_var.set("")
+    update_display()
+
+# Auto-refresh queue
+def refresh_queue():
+    global queue
+    queue = load_queue()
+    update_display()
+    window.after(3000, refresh_queue)  # refresh every 3 seconds
+
+# ----------------- GUI Setup -----------------
+
 window = tk.Tk()
 window.title("PatientFlow - Doctor View")
 window.geometry("700x600")
-window.configure(bg=THEME["BG_COLOR"])
+window.configure(bg=BG)
 
 # Header
-tk.Label(window, text="PatientFlow", font=("Helvetica", 20, "bold"), bg=THEME["BG_COLOR"], fg=THEME["PRIMARY"]).pack(pady=10)
-tk.Label(window, text="Today's Appointment Queue", font=("Helvetica", 14), bg=THEME["BG_COLOR"], fg=THEME["TEXT"]).pack(pady=5)
+tk.Label(window, text="PatientFlow", font=("Helvetica", 20, "bold"), bg=BG, fg=PRIMARY).pack(pady=10)
+tk.Label(window, text="Today's Appointments", font=("Helvetica", 14), bg=BG, fg=FG).pack(pady=5)
 
 # Search Bar
-search_var = tk.StringVar()
-search_frame = tk.Frame(window, bg=THEME["BG_COLOR"])
+search_frame = tk.Frame(window, bg=BG)
 search_frame.pack(pady=10)
 
-tk.Entry(
-    search_frame, textvariable=search_var, font=("Helvetica", 11),
-    bg=THEME["ENTRY_BG"], fg=THEME["TEXT"], width=40, insertbackground=THEME["TEXT"]
-).pack(side="left", padx=10)
+search_var = tk.StringVar()
+search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Helvetica", 11),
+                        bg=ENTRY_BG, fg=FG, insertbackground=FG, width=40)
+search_entry.pack(side="left", padx=10)
 
-create_button(search_frame, "Search", lambda e: update_display()).pack(side="left")
-create_button(search_frame, "Reset", lambda e: reset_filters()).pack(side="left", padx=10)
+# Search Button
+search_btn = tk.Label(search_frame, text="Search", font=("Helvetica", 11, "bold"),
+                      bg=BUTTON, fg="white", padx=15, pady=8, cursor="hand2")
+search_btn.pack(side="left")
+search_btn.bind("<Button-1>", lambda e: update_display())
 
-# Patient Frame
-patient_frame = tk.Frame(window, bg=THEME["BG_COLOR"])
-patient_frame.pack(fill="both", expand=True, padx=20, pady=10)
+# Reset Button
+reset_btn = tk.Label(search_frame, text="Reset", font=("Helvetica", 11, "bold"),
+                     bg=BUTTON, fg="white", padx=15, pady=8, cursor="hand2")
+reset_btn.pack(side="left", padx=10)
+reset_btn.bind("<Button-1>", lambda e: reset_search())
 
-# Initial Load
-queue = load_queue()
-update_display()
+# Scrollable patient list
+canvas = tk.Canvas(window, bg=BG, highlightthickness=0)
+scrollbar = tk.Scrollbar(window, orient="vertical", command=canvas.yview)
+scrollable_frame = tk.Frame(canvas, bg=BG)
+
+canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+canvas.configure(yscrollcommand=scrollbar.set)
+
+scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+canvas.pack(side="left", fill="both", expand=True, padx=20, pady=10)
+scrollbar.pack(side="right", fill="y")
+
+patient_frame = scrollable_frame
 
 # Footer
-tk.Label(window, text="Powered by PatientFlow", font=("Helvetica", 9), bg=THEME["BG_COLOR"], fg="#94A3B8").pack(pady=5)
+tk.Label(window, text="Powered by PatientFlow", font=("Helvetica", 9), bg=BG, fg="#94A3B8").pack(pady=5)
+
+# ----------------- Start App -----------------
+
+queue = load_queue()
+update_display()
+refresh_queue()
 
 window.mainloop()
